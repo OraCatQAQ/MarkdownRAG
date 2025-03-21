@@ -71,18 +71,22 @@ class VectorStore:
             bulk_data.append({
                 "index": {
                     "_index": index_name,
-                    "_id": f"doc_{i}"  # 使用递增的ID
+                    "_id": f"doc_{i}"
                 }
             })
-            bulk_data.append({
+            
+            # 构建文档数据，包含新的img_url字段
+            doc_data = {
                 "content": doc['content'],
                 "vector": vector,
                 "metadata": {
                     "file_name": doc['metadata'].get('file_name', '未知文件'),
                     "source": doc['metadata'].get('source', ''),
-                    "page": doc['metadata'].get('page', '')
+                    "page": doc['metadata'].get('page', ''),
+                    "img_url": doc['metadata'].get('img_url', '')  # 添加img_url字段
                 }
-            })
+            }
+            bulk_data.append(doc_data)
             
         # 批量写入
         if bulk_data:
@@ -135,6 +139,10 @@ class VectorStore:
                             },
                             "page": {
                                 "type": "keyword"
+                            },
+                            "img_url": {  # 新增图片URL字段
+                                "type": "keyword",
+                                "ignore_above": 2048
                             }
                         }
                     }

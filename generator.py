@@ -14,10 +14,19 @@ class Generator:
         """使用SiliconFlow的chat API生成回答"""
         # 构建带有引用标记的上下文
         context_with_refs = []
+        
+        # 处理每个文档
         for i, doc in enumerate(context_docs, 1):
             # 直接使用文件名作为来源
             file_name = doc['metadata'].get('file_name', '未知文件')
-            context_with_refs.append(f"[{i}] {doc['content']}\n来源：{file_name}")
+            img_url = doc['metadata'].get('img_url', '')
+            
+            # 构建文档内容，如果有图片URL则包含在内
+            content = doc['content']
+            if img_url:
+                content += f"\n[图片地址: {img_url}]"
+            
+            context_with_refs.append(f"[{i}] {content}\n来源：{file_name}")
         
         context = "\n\n".join(context_with_refs)
         
@@ -31,7 +40,8 @@ class Generator:
 2. 如果内容来自多个来源，请标注所有相关来源
 3. 如果无法从参考内容中得到答案，请明确说明
 4. 回答要简洁清晰，避免重复引用
-5. 在回答的最后，列出所有引用的文件名称"""
+5. 如果有图片地址，回答中必须包括图片地址
+6. 在回答的最后，列出所有引用的文件名称"""
 
         response = requests.post(
             f"{self.api_base}/chat/completions",
@@ -46,7 +56,7 @@ class Generator:
 
 问题：{query}
 
-请按照要求回答问题，包括引用标注和来源列表。
+请按照要求回答问题，包括图片地址、引用标注和来源列表。
 """}
                 ],
                 "temperature": 0.7,
