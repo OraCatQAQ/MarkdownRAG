@@ -75,15 +75,15 @@ class VectorStore:
                 }
             })
             
-            # 构建文档数据，包含新的img_url字段
+            # 构建文档数据，确保包含所有元数据字段
             doc_data = {
                 "content": doc['content'],
                 "vector": vector,
                 "metadata": {
                     "file_name": doc['metadata'].get('file_name', '未知文件'),
                     "source": doc['metadata'].get('source', ''),
-                    "page": doc['metadata'].get('page', ''),
-                    "img_url": doc['metadata'].get('img_url', '')  # 添加img_url字段
+                    "chunk_header": doc['metadata'].get('chunk_header', ''),
+                    "img_url": doc['metadata'].get('img_url', '')
                 }
             }
             bulk_data.append(doc_data)
@@ -137,10 +137,16 @@ class VectorStore:
                             "source": {
                                 "type": "keyword"
                             },
-                            "page": {
-                                "type": "keyword"
+                            "chunk_header": {  # 新增标题层级字段
+                                "type": "text",
+                                "fields": {
+                                    "keyword": {
+                                        "type": "keyword",
+                                        "ignore_above": 512
+                                    }
+                                }
                             },
-                            "img_url": {  # 新增图片URL字段
+                            "img_url": {
                                 "type": "keyword",
                                 "ignore_above": 2048
                             }

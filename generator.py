@@ -15,18 +15,30 @@ class Generator:
         # 构建带有引用标记的上下文
         context_with_refs = []
         
-        # 处理每个文档
         for i, doc in enumerate(context_docs, 1):
-            # 直接使用文件名作为来源
-            file_name = doc['metadata'].get('file_name', '未知文件')
-            img_url = doc['metadata'].get('img_url', '')
+            metadata = doc['metadata']
+            file_name = metadata.get('file_name', '未知文件')
+            chunk_header = metadata.get('chunk_header', '')
+            img_url = metadata.get('img_url', '')
+            source = metadata.get('source', '')
             
-            # 构建文档内容，如果有图片URL则包含在内
+            # 构建引用标记
+            ref_header = f"[{i}] "
+            if chunk_header:
+                ref_header += f"【{chunk_header}】"
+            
+            # 构建文档内容
             content = doc['content']
-            if img_url:
-                content += f"\n[图片地址: {img_url}]"
             
-            context_with_refs.append(f"[{i}] {content}\n来源：{file_name}")
+            # 如果是图片描述，特殊处理
+            if content.startswith("图片描述：") and img_url:
+                context_with_refs.append(f"{ref_header}{content}\nimg_url: {img_url}")
+            else:
+                # 普通文本内容
+                file = f"file_name: {file_name}"
+                source = f"source: {source}"
+                header = f"header: {chunk_header}"
+                context_with_refs.append(f"{ref_header}{content}\n{file}\n{source}\n{header}")
         
         context = "\n\n".join(context_with_refs)
         
@@ -35,13 +47,15 @@ class Generator:
             "Content-Type": "application/json"
         }
         
-        system_prompt = """你是一个有帮助的助手。请基于提供的参考内容回答问题。
-1. 如果从参考内容中找到答案，请在相关内容后用方括号标注来源编号，例如：[1]、[2]
-2. 如果内容来自多个来源，请标注所有相关来源
-3. 如果无法从参考内容中得到答案，请明确说明
-4. 回答要简洁清晰，避免重复引用
-5. 如果有图片地址，回答中必须包括图片地址
-6. 在回答的最后，列出所有引用的文件名称"""
+        system_prompt = """你是一个有帮助的助手。请基于提供的参考内容回答问题，使用markdown格式。
+1. 如果回答中引用参考内容，请在相关内容后用方括号标注来源编号，例如：[1]、[2]
+2. 如果参考内容中包含图片描述，在适当位置用markdown格式通过img_url给出图片即可
+3. 最后给出引用列表: 将引用内容总结并给出来源和位置
+
+参考格式：
+---
+[1] 一句话概括 [file_name](source) header
+"""
 
         response = requests.post(
             f"{self.api_base}/chat/completions",
@@ -56,7 +70,7 @@ class Generator:
 
 问题：{query}
 
-请按照要求回答问题，包括图片地址、引用标注和来源列表。
+请按照要求回答问题。
 """}
                 ],
                 "temperature": 0.7,
