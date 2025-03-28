@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import os
 import argparse
 from document_processor import DocumentProcessor
@@ -51,20 +51,30 @@ class RAGSystem:
         self.vector_store.store(processed_docs, f"rag_{index_name}")
         print("文档存储完成！")
     
-    def query(self, query: str) -> str:
-        """处理用户查询"""
+    def query(self, query: str) -> Tuple[str, List[Dict]]:
+        """处理用户查询，返回生成的回答和引用的文档列表"""
         print("\n正在检索相关文档...")
         # 检索相关文档
         retrieved_docs, index_name = self.retriever.retrieve(query)
         
+        if not retrieved_docs:
+             print("警告：未能检索到相关文档。")
+             return "抱歉，我没有找到与您问题相关的文档。", []
+
         print("正在重排序文档...")
         # 重排序
         reranked_docs = self.reranker.rerank(query, retrieved_docs, index_name)
         
+        if not reranked_docs:
+             print("警告：重排序后没有文档留下。")
+             reranked_docs = retrieved_docs[:5]
+             if not reranked_docs:
+                 return "抱歉，处理文档时遇到问题，无法生成回答。", []
+
         print("正在生成回答...\n")
         # 生成回答
         response = self.generator.generate(query, reranked_docs)
-        return response
+        return response, reranked_docs
 
 def main():
     # 初始化RAG系统
@@ -104,9 +114,11 @@ def main():
                     
                     try:
                         # 获取回答
-                        response = rag_system.query(query)
+                        response, reranked_docs = rag_system.query(query)
                         print("\n回答：")
                         print(response)
+                        print("\n引用的文档：")
+                        print(reranked_docs)
                     except Exception as e:
                         print(f"\n生成回答时出错：{str(e)}")
                         print("请重试或联系管理员。")

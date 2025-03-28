@@ -15,12 +15,18 @@ import subprocess
 import json
 import re
 import concurrent.futures
+from pathlib import Path
+
+# Helper function to normalize paths
+def normalize_path(path_str: str) -> str:
+    """Converts a path string to an absolute path with forward slashes."""
+    return Path(path_str).resolve().as_posix()
 
 class DocumentLoader:
     """通用文档加载器"""
     def __init__(self, file_path: str):
-        self.file_path = file_path
-        self.extension = os.path.splitext(file_path)[1].lower()
+        self.file_path = normalize_path(file_path)
+        self.extension = os.path.splitext(self.file_path)[1].lower()
         self.api_key = os.getenv("API_KEY")
         self.api_base = os.getenv("BASE_URL")
         
@@ -103,15 +109,16 @@ class DocumentLoader:
         """使用magic-pdf处理PDF文件"""
         try:
             # 获取文件名(不含扩展名)作为处理目录
-            file_hash = os.path.splitext(os.path.basename(pdf_path))[0]
-            output_dir = f"./output/{file_hash}/auto"
-            
+            file_hash = Path(pdf_path).stem
+            output_dir = normalize_path(f"./output/{file_hash}/auto")
+            pdf_abs_path = pdf_path
+
             # 创建输出目录
             os.makedirs(output_dir, exist_ok=True)
             
             # 执行magic-pdf命令
-            command = f"magic-pdf -p {pdf_path} -o ./output"
-            subprocess.run(command, shell=True, check=True)
+            command = f"magic-pdf -p \"{pdf_abs_path}\" -o ./output"
+            subprocess.run(command, shell=True, check=True, cwd=Path.cwd())
             
             # 读取生成的markdown文件
             markdown_path = os.path.join(output_dir, f"{file_hash}.md")
@@ -122,7 +129,8 @@ class DocumentLoader:
                 content = f.read()
                 
             # 将相对路径的图片引用转换为绝对路径
-            content = content.replace('](images/', f']({output_dir}/images/')
+            img_dir_abs = normalize_path(os.path.join(output_dir, "images"))
+            content = re.sub(r'\]\(images/', f']({img_dir_abs}/', content)
             
             return content
                 
@@ -138,7 +146,7 @@ class DocumentLoader:
         image_references = []  # 收集所有图片引用
         
         # 获取markdown文件所在目录，用于解析相对路径
-        base_dir = os.path.dirname(os.path.abspath(self.file_path))
+        base_dir = Path(self.file_path).parent
         
         for line in content.split('\n'):
             # 检查是否是标题
@@ -163,16 +171,24 @@ class DocumentLoader:
             elif line.startswith('!['):
                 img_match = re.search(r'!\[.*?\]\((.*?)\)', line)
                 if img_match:
-                    img_path = img_match.group(1)
+                    img_path_rel = img_match.group(1)
                     
                     # 处理图片路径
-                    if not os.path.isabs(img_path):
-                        # 如果是相对路径，转换为绝对路径
-                        img_path = os.path.normpath(os.path.join(base_dir, img_path))
+                    try:
+                        # Check if path is already absolute (might happen if PDF processor output absolute paths)
+                        if Path(img_path_rel).is_absolute():
+                            img_path_abs = normalize_path(img_path_rel)
+                        else:
+                            # Resolve relative to the markdown file's directory
+                            img_path_abs = normalize_path(base_dir / img_path_rel)
+                    except Exception as path_e:
+                        print(f"警告：处理图片路径时出错 '{img_path_rel}': {path_e}")
+                        current_content.append(line)
+                        continue
                     
                     # 验证图片文件是否存在
-                    if not os.path.exists(img_path):
-                        print(f"警告：图片文件不存在: {img_path}")
+                    if not os.path.exists(img_path_abs):
+                        print(f"警告：图片文件不存在: {img_path_abs}")
                         current_content.append(line)
                         continue
                     
@@ -187,7 +203,7 @@ class DocumentLoader:
                     
                     # 收集图片信息，稍后处理
                     image_references.append({
-                        'img_path': img_path,
+                        'img_path': img_path_abs,
                         'position': len(chunks),
                         'headers': current_headers.copy()
                     })
@@ -196,7 +212,7 @@ class DocumentLoader:
                     chunks.append({
                         'content': f"[图片占位符]",
                         'headers': current_headers.copy(),
-                        'img_url': img_path
+                        'img_url': img_path_abs
                     })
                 else:
                     current_content.append(line)
@@ -348,17 +364,20 @@ class DocumentLoader:
                 
             elif self.extension == '.txt':
                 loader = TextLoader(self.file_path, encoding='utf-8')
-                return loader.load()
+                docs = loader.load()
+                for doc in docs:
+                    doc.metadata['source'] = self.file_path
+                return docs
             elif self.extension in ['.png', '.jpg', '.jpeg', '.gif', '.bmp']:
                 # 处理图片
                 description = self.process_image(self.file_path)
                 # 创建一个包含图片描述的文档
                 from langchain.schema import Document
                 doc = Document(
-                    page_content=description,
+                    page_content=description if description else "无法处理的图片",
                     metadata={
                         'source': self.file_path,
-                        'img_url': os.path.abspath(self.file_path)  # 存储图片的绝对路径
+                        'img_url': self.file_path
                     }
                 )
                 return [doc]
@@ -368,8 +387,15 @@ class DocumentLoader:
         except UnicodeDecodeError:
             # 如果 utf-8 失败，尝试 gbk
             if self.extension in ['.md', '.txt']:
-                loader = TextLoader(self.file_path, encoding='gbk')
-                return loader.load()
+                try:
+                    loader = TextLoader(self.file_path, encoding='gbk')
+                    docs = loader.load()
+                    for doc in docs:
+                        doc.metadata['source'] = self.file_path
+                    return docs
+                except Exception as e_gbk:
+                    print(f"尝试 GBK 解码失败: {e_gbk}")
+                    raise
             raise
 
 class DocumentProcessor:
@@ -394,35 +420,43 @@ class DocumentProcessor:
         加载并处理文档，支持目录或单个文件
         返回：处理后的文档列表
         """
-        if os.path.isdir(path):
-            documents = []
-            for root, _, files in os.walk(path):
+        normalized_input_path = normalize_path(path)
+
+        all_loaded_docs = []
+        if os.path.isdir(normalized_input_path):
+            for root, _, files in os.walk(normalized_input_path):
                 for file in files:
-                    file_path = os.path.join(root, file)
+                    file_path_abs = normalize_path(os.path.join(root, file))
                     try:
-                        loader = DocumentLoader(file_path)
+                        loader = DocumentLoader(file_path_abs)
                         docs = loader.load()
                         # 添加文件名到metadata
+                        file_name = Path(file_path_abs).name
                         for doc in docs:
-                            doc.metadata['file_name'] = os.path.basename(file_path)
-                        documents.extend(docs)
+                            doc.metadata['file_name'] = file_name
+                            if 'source' not in doc.metadata or not doc.metadata['source']:
+                                doc.metadata['source'] = file_path_abs
+                        all_loaded_docs.extend(docs)
                     except Exception as e:
-                        print(f"警告：加载文件 {file_path} 时出错: {str(e)}")
+                        print(f"警告：加载文件 {file_path_abs} 时出错: {str(e)}")
                         continue
         else:
             try:
-                loader = DocumentLoader(path)
-                documents = loader.load()
+                loader = DocumentLoader(normalized_input_path)
+                docs = loader.load()
                 # 添加文件名到metadata
-                file_name = os.path.basename(path)
-                for doc in documents:
+                file_name = Path(normalized_input_path).name
+                for doc in docs:
                     doc.metadata['file_name'] = file_name
+                    if 'source' not in doc.metadata or not doc.metadata['source']:
+                        doc.metadata['source'] = normalized_input_path
+                all_loaded_docs.extend(docs)
             except Exception as e:
                 print(f"加载文件时出错: {str(e)}")
                 raise
         
         # 分块
-        chunks = self.text_splitter.split_documents(documents)
+        chunks = self.text_splitter.split_documents(all_loaded_docs)
         
         # 处理成统一格式
         processed_docs = []
@@ -431,7 +465,7 @@ class DocumentProcessor:
                 'id': f'doc_{i}',
                 'content': chunk.page_content,
                 'metadata': {
-                    'file_name': chunk.metadata.get('file_name', '未知文件'),
+                    'file_name': chunk.metadata.get('file_name', Path(chunk.metadata.get('source', '未知文件')).name),
                     'source': chunk.metadata.get('source', ''),
                     'chunk_header': chunk.metadata.get('chunk_header', ''),
                     'img_url': chunk.metadata.get('img_url', '')

@@ -1,0 +1,22 @@
+# Base dependencies
+langchain
+langchain-community
+elasticsearch
+requests
+numpy
+pillow # For image processing in document_processor
+python-dotenv # For loading .env files
+
+# Document Loaders & Processing
+unstructured # For UnstructuredMarkdownLoader, etc.
+pypdf # For PyPDFLoader
+magic-pdf # For advanced PDF processing
+
+# UI Framework
+streamlit
+
+# Optional but recommended for performance/specific features
+# tiktoken # Often used by langchain for token counting
+# sentence-transformers # Might be implicitly used by embedding models or rerankers
+
+# Add any other specific dependencies your project might have 
