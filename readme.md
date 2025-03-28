@@ -48,8 +48,10 @@ PASSWORD=your_elasticsearch_password
 API_KEY=your_siliconflow_api_key
 BASE_URL=https://api.siliconflow.com/v1
 ```
+### 5. 安装MinerU(pdf需要)
+见https://github.com/opendatalab/MinerU?tab=readme-ov-file#quick-start
 
-### 5. 启动应用
+### 6. 启动应用
 
 ```bash
 streamlit run ui.py
